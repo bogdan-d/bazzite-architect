@@ -1,0 +1,571 @@
+.container {
+  margin: 0;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  color: #ffffff;
+  background-color: #0f0f0f;
+  min-height: 100%;
+}
+
+.card {
+  background-color: #1e1e1e;
+  padding: 2rem;
+  border-radius: 10px;
+  border: 1px solid #2a2a2a; /* subtle border */
+  margin-top: 2rem;
+  text-align: center;
+}
+
+.content button {
+  background-color: #3584e4; /* Adwaita accent */
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: var(--window-radius);
+  cursor: pointer;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.content button:hover {
+  background-color: #1c71d8; /* hover accent */
+}
+
+.status-box {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #222;
+  border-radius: 6px;
+  font-family: monospace;
+}
+
+/* Busy cursor for app-wide loading */
+.busy {
+  cursor: progress !important;
+}
+
+/* Small inline spinner */
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #666;
+  border-top-color: #3584e4;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  vertical-align: -2px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+:root { /* ensure radius is available everywhere */
+  --window-radius: 12px;
+}
+
+/* Global reset and window fill */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* no scroll on root; content area manages its own scroll */
+  background: #1e1e1e; /* ensure no white flashes/corners and fast fill on resize */
+}
+
+/* After app is ready, make the window background transparent so rounded corners look native */
+html.app-ready, body.app-ready, #root.app-ready {
+  background: transparent;
+}
+
+/* --- Layout with HeaderBar + Content --- */
+.layout {
+  --header-height: 48px; /* keep in sync with .headerbar height */
+  --window-radius: 12px; /* single source of truth for rounding */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden; /* clip content to rounded corners */
+  background-color: #1e1e1e; /* Adwaita Dark content */
+  color: #ffffff;
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  border-radius: var(--window-radius); /* rounded window corners */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04); /* subtle border like GNOME */
+  position: relative; /* establish a positioned ancestor so absolute modal-backdrops are clipped by border-radius */
+}
+
+/* HeaderBar (GNOME style) */
+.headerbar {
+  position: relative;
+  z-index: 99999 !important; /* ensure topmost for drag */
+  display: flex;
+  align-items: center !important; /* vertical centering for all children */
+  justify-content: space-between;
+  height: 48px; /* fixed header height */
+  background: #242424;
+  border-bottom: 1px solid #2a2a2a;
+  padding: 0 8px; /* no vertical padding that could offset content */
+  -webkit-user-select: none;
+  user-select: none;
+  line-height: normal; /* prevent inherited baseline quirks */
+  pointer-events: auto !important; /* ensure it receives pointer events */
+}
+.header-title,
+.header-nav,
+.header-controls {
+  position: relative;
+  height: 48px !important; /* only the three main containers get fixed height */
+}
+/* Title and controls use flex for horizontal layout */
+.header-title,
+.header-controls {
+  display: flex !important;
+  align-items: center !important;
+}
+.header-title { justify-content: flex-start; }
+
+.header-title {
+  font-weight: 600;
+  color: #dcdcdc;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+.header-nav {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: center !important;
+  align-items: center !important;
+  height: 48px !important;
+  gap: 0; /* spacing handled by inner view-switcher */
+  margin: 0 !important;
+  padding: 0 !important;
+  align-self: auto;
+}
+.view-switcher {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.view-switcher .view-btn {
+  text-decoration: none;
+  color: #e6e6e6;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important; /* center icon + label */
+  justify-content: center !important;
+  height: 32px !important; /* per instructions */
+  line-height: 1 !important; /* neutralize emoji/text baseline issues */
+  padding: 0 12px !important; /* horizontal padding only */
+  margin: 0 !important;
+  gap: 6px;
+  border-radius: var(--window-radius);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.view-switcher .view-btn:hover {
+  background: #2b2b2b;
+}
+.view-switcher .view-btn.active {
+  background: #2b2b2b;
+  border-color: #2a2a2a;
+}
+.view-switcher .view-btn .label { line-height: 1 !important; }
+.view-switcher .view-btn [role="img"] { display: inline-flex; vertical-align: middle; margin-bottom: 0; }
+
+.header-controls {
+  justify-content: center;
+  gap: 6px;
+}
+
+
+.content {
+  flex: 1;
+  padding: 0; /* padding moved to clamp wrapper */
+  overflow-y: auto; /* only content scrolls (other pages). Dashboard prevents overflow via flex sizing */
+  overflow-x: hidden;
+  background: #1e1e1e;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* allow children to shrink */
+}
+
+/* Clamp wrapper for centered, max-width content */
+.clamp {
+  --clamp-vpad: 40px; /* top+bottom padding; keep in sync with padding */
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0; /* critical for flex shrink */
+  overflow: hidden; /* contain children */
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.env-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.env-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+.muted {
+  color: #9ca3af;
+  font-size: 0.9em;
+}
+.status {
+  margin-top: 4px;
+  font-size: 0.85em;
+}
+
+/* Fluid grid for environments */
+.environments-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.card.grid-card {
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 12px;
+}
+.log-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.log-pre {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+
+/* Window controls */
+.window-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.win-btn {
+  height: 28px;
+  width: 28px;
+  border-radius: var(--window-radius);
+  background: #2b2b2b;
+  border: 1px solid #2a2a2a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0; /* override global button margins to stay vertically centered */
+  font-size: 0; /* prevent text metrics from affecting centering */
+  line-height: 0; /* eliminate inline-block baseline influence */
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+}
+.headerbar .win-btn {
+  background: #2b2b2b; /* re-assert header button styling */
+  border: 1px solid #2a2a2a;
+}
+.win-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block; /* avoid baseline alignment gaps */
+}
+.win-btn:hover {
+  background: #3a3a3a;
+}
+.win-btn.win-close:hover {
+  background: #a51d2d;
+}
+
+/* Dashboard split layout */
+.dashboard-split {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto; /* take remaining space */
+  min-height: 0; /* allow inner flex items to shrink */
+  overflow: hidden; /* prevent overflow scrollbars */
+}
+.actions {
+  width: 100%;
+  max-width: 960px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto;
+}
+.action-banner-btn {
+  width: 100%;
+  height: 56px;
+  border-radius: var(--window-radius);
+  border: 1px solid #2a2a2a;
+  background: linear-gradient(180deg, #2b2b2b 0%, #262626 100%);
+  color: #e6e6e6;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.2px;
+  padding: 0 16px;
+  margin: 0; /* überschreibt generische Button-Margins */
+  cursor: pointer;
+}
+.action-banner-btn:hover {
+  background: linear-gradient(180deg, #333333 0%, #2b2b2b 100%);
+}
+.action-status { align-self: stretch; }
+
+.carousel-wrap {
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column; /* critical for shrink */
+  flex: 1; /* take remaining space */
+  min-height: 0; /* allow child to compute within flex box */
+  min-width: 0; /* prevent horizontal overflow calculations */
+  overflow: hidden; /* prevent clipping/scrollbars */
+  align-items: center;
+  justify-content: center; /* center the carousel */
+  position: relative; /* for visual buffer */
+  container-type: size; /* enable cqw/cqh for children */
+}
+
+/* Featured carousel */
+.featured-carousel {
+  position: relative;
+  /* Size constraints via container queries for strict proportionality */
+  width: min(1000px, 100cqw, 100cqh * (16 / 9));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  border-radius: 12px; /* fixed per GNOME design */
+  overflow: hidden; /* mandatory to contain inner content */
+  background: #1e1e1e; /* match app gray as fallback */
+  box-sizing: border-box;
+  flex: 0 1 auto; /* do not force height growth */
+  align-self: center;
+}
+/* Inner viewport that owns clipping and isolates compositing */
+.featured-viewport {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  overflow: hidden; /* contain absolutely positioned children */
+  isolation: isolate;
+  contain: paint;
+}
+.carousel-slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 500ms ease-in-out;
+  border-radius: inherit; /* ensure slide respects rounding */
+  overflow: hidden; /* clip its child image */
+}
+.carousel-slide.active { opacity: 1; }
+.carousel-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* fill card and crop if needed to avoid bleed */
+  object-position: center center;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  border-radius: inherit; /* inherit from slide/container */
+  background: transparent;
+}
+
+/* Primary menu (GNOME-like) */
+.primary-menu {
+  position: relative; /* anchor for popover */
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+}
+.primary-menu-trigger {
+  height: 28px;
+  width: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #e6e6e6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.primary-menu-trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.primary-menu-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(53,132,228,0.6);
+}
+.menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: #2b2b2b; /* slightly lifted from header */
+  color: #e6e6e6;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.04);
+  z-index: 100000; /* above header */
+  isolation: isolate;
+}
+.menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px; /* not flush with popover edges */
+  background: transparent;
+  border: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: rgba(255,255,255,0.08);
+}
+.menu-item .icon {
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+.menu-item .text { flex: 1; }
+.menu-divider {
+  height: 1px;
+  margin: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 0;
+}
+
+/* Simple modal styling (GNOME-like) */
+/* Use absolute positioning inside the .layout so the modal backdrop is clipped by the app's rounded corners
+   (the .layout has border-radius: var(--window-radius) and overflow: hidden). This prevents dark corners
+   from appearing outside the rounded window when a modal is open. */
+.modal-backdrop {
+  /* Use fixed positioning so modal backdrops reliably overlay the entire app (including header)
+     regardless of where the modal is rendered in the DOM. Use clip-path to respect the app
+     rounded corners so the overlay does not darken outside the window radius. */
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100001;
+  /* Clip the fixed overlay to a rounded rect matching the app window radius */
+  clip-path: inset(0 round var(--window-radius));
+  -webkit-clip-path: inset(0 round var(--window-radius));
+  /* animation */
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+.modal-backdrop.show {
+  opacity: 1;
+}
+.modal-backdrop.closing {
+  opacity: 0;
+}
+
+/* Ensure form controls inside modals are on top to avoid accidental overlapping hitbox issues */
+.modal-card input, .modal-card textarea, .modal-card select {
+  position: relative;
+  z-index: 100004;
+}
+
+.modal-card {
+  background: #1f2937;
+  color: #e6e6e6;
+  border-radius: 12px;
+  border: 1px solid #374151;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.04);
+  width: min(560px, 90vw);
+  padding: 16px;
+  /* ensure modal content sits above any backdrop and is fully interactive */
+  position: relative;
+  z-index: 100002;
+  pointer-events: auto;
+  /* animation */
+  transform: translateY(-6px) scale(0.985);
+  opacity: 0;
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+.modal-backdrop.show .modal-card {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+.modal-backdrop.closing .modal-card {
+  transform: translateY(-6px) scale(0.985);
+  opacity: 0;
+}
+.modal-card header {
+  font-weight: 700;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.modal-card .body { font-size: 14px; opacity: 0.95; }
+.modal-card .footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px; /* match CreateEnvModal spacing */
+}
+.modal-card .footer button {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid #2a2a2a;
+  background: #3a3a3a;
+  color: #e6e6e6;
+  cursor: pointer;
+}
+.modal-card .footer button:hover { background: #4a4a4a; }

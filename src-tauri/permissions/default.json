@@ -1,0 +1,24 @@
+{
+  "identifier": "default",
+  "description": "Allows invoking Bazzite Architect application commands from the main window",
+  "commands": {
+    "allow": [
+      "system_check",
+      "scan_drives",
+      "get_active_storage_path",
+      "apply_storage_setup",
+      "list_environments",
+      "create_environment",
+      "open_in_vscode",
+      "start_environment",
+      "stop_environment",
+      "delete_environment",
+      "get_environment_space",
+      "resolve_project_path",
+      "get_dir_size",
+      "cancel_dir_size_jobs",
+      "drag_window"
+    ],
+    "deny": []
+  }
+}

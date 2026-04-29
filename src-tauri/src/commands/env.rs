@@ -1,0 +1,648 @@
+use crate::commands::logs;
+use crate::core::environment::{
+    self, CreateEnvironmentParams, EnvironmentManifest, ProgressKind, ProgressUpdate,
+};
+use crate::core::util::{build_host_command, build_host_command_async};
+use serde::{Deserialize, Serialize};
+use tauri::Emitter;
+
+const CREATE_ENV_EVENT: &str = "creation-progress";
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+enum ProgressLevel {
+    Info,
+    Error,
+}
+
+#[derive(Serialize, Clone)]
+struct ProgressPayload {
+    stage: String,
+    message: String,
+    level: ProgressLevel,
+    done: bool,
+    success: Option<bool>,
+}
+
+impl ProgressPayload {
+    fn from_update(update: ProgressUpdate) -> Self {
+        Self {
+            stage: update.stage.to_string(),
+            message: update.message,
+            level: match update.kind {
+                ProgressKind::Info => ProgressLevel::Info,
+                ProgressKind::Error => ProgressLevel::Error,
+            },
+            done: false,
+            success: None,
+        }
+    }
+
+    fn completion(
+        stage: &'static str,
+        message: String,
+        level: ProgressLevel,
+        success: Option<bool>,
+    ) -> Self {
+        Self {
+            stage: stage.to_string(),
+            message,
+            level,
+            done: true,
+            success,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CreateEnvironmentRequest {
+    pub name: String,
+    pub template: String,
+    #[serde(rename = "homeMount", alias = "home_mount")]
+    pub home_mount: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct EnvironmentInfo {
+    pub name: String,
+    pub image: String,
+    pub status: String,
+    pub container_id: String,
+}
+
+#[tauri::command]
+pub fn list_environments(app: tauri::AppHandle) -> Result<Vec<EnvironmentInfo>, String> {
+    let output = build_host_command("distrobox")
+        .args(["list", "--no-color"])
+        .output()
+        .map_err(|e| format!("Failed to execute 'distrobox list': {}", e))?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut environments = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("ID") && trimmed.contains("NAME") {
+            continue;
+        }
+        if trimmed.starts_with('-') || trimmed.starts_with('=') {
+            continue;
+        }
+
+        if trimmed.contains('|') {
+            let parts: Vec<String> = trimmed
+                .split('|')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect();
+            if parts.len() >= 4 {
+                environments.push(EnvironmentInfo {
+                    container_id: parts[0].clone(),
+                    name: parts[1].clone(),
+                    status: parts[2].clone(),
+                    image: parts[3].clone(),
+                });
+                continue;
+            }
+        }
+
+        let ws: Vec<&str> = trimmed.split_whitespace().collect();
+        if ws.len() >= 4 {
+            environments.push(EnvironmentInfo {
+                container_id: ws[0].to_string(),
+                name: ws[1].to_string(),
+                status: ws[2].to_string(),
+                image: ws[3].to_string(),
+            });
+        }
+    }
+
+    logs::info(
+        &app,
+        "env",
+        format!("Listed {} environments", environments.len()),
+    );
+    Ok(environments)
+}
+
+#[tauri::command]
+pub async fn create_environment(
+    app: tauri::AppHandle,
+    request: CreateEnvironmentRequest,
+) -> Result<(), String> {
+    let name = request.name.trim().to_string();
+    if name.is_empty() {
+        return Err("Environment name is empty.".to_string());
+    }
+    let template = request.template.trim().to_string();
+    let home_mount = request
+        .home_mount
+        .map(|hm| hm.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let params = CreateEnvironmentParams {
+        name: name.clone(),
+        template: template.clone(),
+        home_mount,
+    };
+
+    logs::info(
+        &app,
+        "env",
+        format!("Create start: name='{}' template='{}'", name, template),
+    );
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let emit_progress = |update: ProgressUpdate| {
+            let payload = ProgressPayload::from_update(update.clone());
+            let kind = update.kind.clone();
+            let message = update.message.clone();
+            let _ = app_handle.emit(CREATE_ENV_EVENT, &payload);
+            match kind {
+                ProgressKind::Info => logs::info(&app_handle, "env", message),
+                ProgressKind::Error => logs::error(&app_handle, "env", message),
+            }
+        };
+
+        match environment::create_environment(params, |update| emit_progress(update)).await {
+            Ok(result) => {
+                let payload = ProgressPayload::completion(
+                    "complete",
+                    result.message.clone(),
+                    ProgressLevel::Info,
+                    Some(true),
+                );
+                let _ = app_handle.emit(CREATE_ENV_EVENT, &payload);
+                logs::info(&app_handle, "env", result.message.clone());
+                let _ = app_handle.emit(
+                    "app-notification",
+                    serde_json::json!({ "message": "Environment created", "type": "success" }),
+                );
+            }
+            Err(err) => {
+                let payload = ProgressPayload::completion(
+                    "error",
+                    err.clone(),
+                    ProgressLevel::Error,
+                    Some(false),
+                );
+                let _ = app_handle.emit(CREATE_ENV_EVENT, &payload);
+                logs::error(&app_handle, "env", err.clone());
+                let _ = app_handle.emit(
+                    "app-notification",
+                    serde_json::json!({ "message": "Environment creation failed", "type": "error" })
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct DeleteEnvironmentRequest {
+    pub name: String,
+    #[serde(rename = "deleteProject")]
+    pub delete_project: bool,
+}
+
+pub fn resolve_host_project_path(env_name: &str) -> Option<String> {
+    let home_out = build_host_command("distrobox")
+        .args([
+            "enter",
+            env_name,
+            "--",
+            "bash",
+            "-lc",
+            "printf %s \"$HOME\"",
+        ])
+        .output()
+        .ok()?;
+    if !home_out.status.success() {
+        return None;
+    }
+    let container_home = String::from_utf8_lossy(&home_out.stdout).trim().to_string();
+    if container_home.is_empty() {
+        return None;
+    }
+
+    let findmnt_out = build_host_command("distrobox")
+        .args([
+            "enter",
+            env_name,
+            "--",
+            "bash",
+            "-lc",
+            "if command -v findmnt >/dev/null 2>&1; then findmnt -n -o SOURCE --target \"$HOME\"; fi",
+        ])
+        .output()
+        .ok();
+    let mut findmnt_src_path = String::new();
+    if let Some(out) = &findmnt_out {
+        if out.status.success() {
+            let out_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            for token in out_s.split_whitespace() {
+                if let (Some(lb), Some(rb)) = (token.find('['), token.find(']')) {
+                    if rb > lb + 1 {
+                        let inner = &token[lb + 1..rb];
+                        if inner.starts_with('/') {
+                            findmnt_src_path = inner.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+            if findmnt_src_path.is_empty() && out_s.starts_with('/') {
+                findmnt_src_path = out_s;
+            }
+        }
+    }
+    if !findmnt_src_path.is_empty() && std::path::Path::new(&findmnt_src_path).exists() {
+        return Some(findmnt_src_path);
+    }
+
+    if container_home.starts_with("/home/") {
+        let suffix = &container_home["/home/".len()..];
+        let candidate = format!("/var/home/{}", suffix);
+        if std::path::Path::new(&candidate).exists() {
+            return Some(candidate);
+        }
+    }
+
+    let host_home = std::env::var("HOME").unwrap_or_else(|_| String::from("/home"));
+    let inferred = format!("{}/{}", host_home, env_name);
+    if std::path::Path::new(&inferred).exists() {
+        return Some(inferred);
+    }
+
+    None
+}
+
+#[tauri::command]
+pub fn start_environment(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let env_name = name.trim();
+    if env_name.is_empty() {
+        return Err("Environment name is empty.".to_string());
+    }
+
+    logs::info(&app, "env", format!("Start requested: '{}'", env_name));
+
+    let output = build_host_command("distrobox")
+        .args(["enter", env_name, "--", "bash", "-lc", "true"])
+        .output()
+        .map_err(|e| {
+            let msg = format!("Failed to execute 'distrobox enter ...': {}", e);
+            logs::error(
+                &app,
+                "env",
+                format!("start_environment failed for '{}': {}", env_name, msg),
+            );
+            msg
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let code = output.status.code().unwrap_or(-1);
+        let msg = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("distrobox enter (start) failed (exit code {})", code)
+        };
+        logs::error(
+            &app,
+            "env",
+            format!("start_environment failed for '{}': {}", env_name, &msg),
+        );
+        return Err(msg);
+    }
+
+    let msg = format!("✅ Environment '{}' was started.", env_name);
+    logs::info(&app, "env", format!("Start ok: '{}'", env_name));
+    Ok(msg)
+}
+
+#[tauri::command]
+pub fn stop_environment(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let env_name = name.trim();
+    if env_name.is_empty() {
+        return Err("Environment name is empty.".to_string());
+    }
+
+    logs::info(&app, "env", format!("Stop requested: '{}'", env_name));
+
+    let output = build_host_command("distrobox")
+        .args(["stop", "--yes", env_name])
+        .output()
+        .map_err(|e| {
+            let msg = format!("Failed to execute 'distrobox stop --yes': {}", e);
+            logs::error(
+                &app,
+                "env",
+                format!("stop_environment failed for '{}': {}", env_name, msg),
+            );
+            msg
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let code = output.status.code().unwrap_or(-1);
+        let msg = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("distrobox stop failed (exit code {})", code)
+        };
+        logs::error(
+            &app,
+            "env",
+            format!("stop_environment failed for '{}': {}", env_name, &msg),
+        );
+        return Err(msg);
+    }
+
+    let msg = format!("✅ Environment '{}' was stopped.", env_name);
+    logs::info(&app, "env", format!("Stop ok: '{}'", env_name));
+    Ok(msg)
+}
+
+#[tauri::command]
+pub async fn delete_environment(
+    app: tauri::AppHandle,
+    request: DeleteEnvironmentRequest,
+) -> Result<String, String> {
+    let env_name = request.name.trim();
+    if env_name.is_empty() {
+        return Err("Environment name is empty.".to_string());
+    }
+
+    let project_path = if request.delete_project {
+        resolve_host_project_path(env_name)
+    } else {
+        None
+    };
+
+    let output = build_host_command("distrobox")
+        .args(["rm", "-f", env_name])
+        .output()
+        .map_err(|e| format!("Failed to execute 'distrobox rm': {}", e))?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    // Attempt to clean up any orphaned DevContainer podman containers labeled with the project path.
+    // Fedora Silverblue / Bazzite often has /home -> /var/home symlink. VS Code may label using either path.
+    // We'll query podman for both path variants and remove any matching containers. This must NOT fail
+    // the overall deletion; we only log failures and proceed.
+    let mut extra = String::new();
+    if let Some(pp) = &project_path {
+        // Strip any trailing slashes to match VS Code labels which don't include a trailing slash
+        let clean_pp = pp.trim_end_matches('/').to_string();
+
+        // prepare candidate path variants and deduplicate while preserving order
+        let mut variants: Vec<String> = Vec::new();
+        let s = clean_pp.as_str();
+        if s.starts_with("/var/home/") {
+            variants.push(s.replacen("/var/home/", "/home/", 1));
+            variants.push(s.to_string());
+        } else if s.starts_with("/home/") {
+            variants.push(s.to_string());
+            variants.push(s.replacen("/home/", "/var/home/", 1));
+        } else {
+            variants.push(s.to_string());
+            variants.push(s.replacen("/var/home/", "/home/", 1));
+            variants.push(s.replacen("/home/", "/var/home/", 1));
+        }
+        variants.dedup();
+
+        // collect unique container ids found across all variants
+        let mut ids_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for v in &variants {
+        let filter_arg = format!("label=devcontainer.local_folder={}", v);
+        let mut ps_cmd = build_host_command_async("podman");
+        ps_cmd.args(["ps", "-a", "-q", "--filter", &filter_arg]);
+        match ps_cmd.output().await {
+            Ok(ps_out) => {
+
+                    if ps_out.status.success() {
+                        let ids = String::from_utf8_lossy(&ps_out.stdout).trim().to_string();
+                        if !ids.is_empty() {
+                            for id in ids.split_whitespace() {
+                                ids_set.insert(id.to_string());
+                            }
+                            logs::info(&app, "env", format!("Found podman containers for project label variant {}: {}", v, ids));
+                        } else {
+                            logs::info(&app, "env", format!("No podman containers found for project label variant {}", v));
+                        }
+                    } else {
+                        let stderr = String::from_utf8_lossy(&ps_out.stderr).trim().to_string();
+                        logs::error(&app, "env", format!("podman ps failed for project variant {}: {}", v, stderr));
+                    }
+                }
+                Err(e) => {
+                    logs::error(&app, "env", format!("Failed to execute 'podman ps' for variant {}: {}", v, e));
+                }
+            }
+        }
+
+        if !ids_set.is_empty() {
+        // Build rm command with unique ids
+        let mut rm_cmd = build_host_command_async("podman");
+        rm_cmd.arg("rm").arg("-f");
+        for id in ids_set.iter() { rm_cmd.arg(id); }
+        match rm_cmd.output().await {
+            Ok(rm_out) => {
+
+                    if rm_out.status.success() {
+                        let id_list: Vec<String> = ids_set.iter().cloned().collect();
+                        logs::info(&app, "env", format!("Removed {} orphaned podman container(s) for project path {}", id_list.len(), pp));
+                        extra.push_str(&format!("\n🧹 Removed orphaned DevContainer(s): {}", id_list.join(", ")));
+                    } else {
+                        let stderr = String::from_utf8_lossy(&rm_out.stderr).trim().to_string();
+                        logs::error(&app, "env", format!("podman rm failed for project {}: {}", pp, stderr));
+                    }
+                }
+                Err(e) => {
+                    logs::error(&app, "env", format!("Failed to execute 'podman rm': {}", e));
+                }
+            }
+        }
+    }
+
+    if let Some(pp) = project_path {
+        let p = std::path::Path::new(&pp);
+        if p.exists() && p.is_dir() {
+            let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/home"));
+            let home_candidates = vec![
+                String::from("/home"),
+                String::from("/var/home"),
+                home.clone(),
+                format!("/var{}", home),
+            ];
+            let is_dangerous = home_candidates.iter().any(|hc| hc == &pp);
+            let looks_like_project = p.join(".devcontainer").join("devcontainer.json").exists();
+
+            if !is_dangerous && looks_like_project {
+                if let Err(e) = std::fs::remove_dir_all(&p) {
+                    extra.push_str(&format!("\n⚠️ Project folder could not be deleted: {} ({})", pp, e));
+                } else {
+                    extra.push_str(&format!("\n🧹 Project folder deleted: {}", pp));
+                }
+            } else {
+                extra.push_str(&format!("\nℹ️ Project folder not deleted (safety guard): {}", pp));
+            }
+        }
+    }
+
+    let ok = format!("✅ Environment '{}' was deleted.{}", env_name, extra);
+
+    let _ = app.emit(
+        "app-notification",
+        serde_json::json!({ "message": "Environment deleted", "type": "success" }),
+    );
+
+    Ok(ok)
+}
+
+#[tauri::command]
+pub fn get_environment_manifest(project_path: String) -> Result<EnvironmentManifest, String> {
+    use std::fs;
+    let manifest_path = std::path::Path::new(&project_path).join(".bazzite-architect.json");
+    let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
+        format!(
+            "Failed to read manifest ({}): {}",
+            manifest_path.display(),
+            e
+        )
+    })?;
+    let manifest: EnvironmentManifest = serde_json::from_str(&manifest_content).map_err(|e| {
+        format!(
+            "Failed to parse manifest ({}): {}",
+            manifest_path.display(),
+            e
+        )
+    })?;
+    Ok(manifest)
+}
+
+#[tauri::command]
+pub async fn install_system_package(
+    name: String,
+    project_path: String,
+    package: String,
+) -> Result<(), String> {
+    use std::fs;
+
+    let manifest_path = std::path::Path::new(&project_path).join(".bazzite-architect.json");
+    let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
+        format!(
+            "Failed to read manifest ({}): {}",
+            manifest_path.display(),
+            e
+        )
+    })?;
+    let mut manifest: EnvironmentManifest =
+        serde_json::from_str(&manifest_content).map_err(|e| {
+            format!(
+                "Failed to parse manifest ({}): {}",
+                manifest_path.display(),
+                e
+            )
+        })?;
+
+    if manifest.system_packages.iter().any(|p| p == &package) {
+        return Ok(());
+    }
+
+    manifest.system_packages.push(package.clone());
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
+    fs::write(&manifest_path, manifest_json).map_err(|e| {
+        format!(
+            "Failed to write manifest ({}): {}",
+            manifest_path.display(),
+            e
+        )
+    })?;
+
+    let devcontainer_path = std::path::Path::new(&project_path)
+        .join(".devcontainer")
+        .join("devcontainer.json");
+    let dev_json_str = fs::read_to_string(&devcontainer_path).map_err(|e| {
+        format!(
+            "Failed to read devcontainer.json ({}): {}",
+            devcontainer_path.display(),
+            e
+        )
+    })?;
+    let mut dev_val: serde_json::Value = serde_json::from_str(&dev_json_str).map_err(|e| {
+        format!(
+            "Failed to parse devcontainer.json ({}): {}",
+            devcontainer_path.display(),
+            e
+        )
+    })?;
+
+    let append = format!(" && sudo dnf install -y {}", package);
+    match dev_val.get_mut("postCreateCommand") {
+        Some(v) => {
+            if let Some(s) = v.as_str() {
+                let mut s_owned = s.to_string();
+                s_owned.push_str(&append);
+                *v = serde_json::Value::String(s_owned);
+            } else {
+                *v = serde_json::Value::String(format!("sudo dnf install -y {}", package));
+            }
+        }
+        None => {
+            if let Some(obj) = dev_val.as_object_mut() {
+                obj.insert(
+                    "postCreateCommand".to_string(),
+                    serde_json::Value::String(format!("sudo dnf install -y {}", package)),
+                );
+            } else {
+                return Err("devcontainer.json does not have an object root".to_string());
+            }
+        }
+    }
+
+    let new_dev_json = serde_json::to_string_pretty(&dev_val)
+        .map_err(|e| format!("Failed to serialize devcontainer.json: {}", e))?;
+    fs::write(&devcontainer_path, new_dev_json).map_err(|e| {
+        format!(
+            "Failed to write devcontainer.json ({}): {}",
+            devcontainer_path.display(),
+            e
+        )
+    })?;
+
+    let output = build_host_command("distrobox")
+        .args([
+            "enter", &name, "--", "sudo", "dnf", "install", "-y", &package,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to execute 'distrobox enter': {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let msg = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(format!("Installation in the container failed: {}", msg));
+    }
+
+    Ok(())
+}

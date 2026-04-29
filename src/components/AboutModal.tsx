@@ -1,0 +1,50 @@
+import { useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
+const REPO_URL = "https://github.com/Kubaguette/bazzite-architect";
+
+export default function AboutModal({ onClose }: { onClose: () => void }) {
+  const [show, setShow] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") startClose(); };
+    document.addEventListener("keydown", onKey, true);
+    // trigger enter animation
+    requestAnimationFrame(() => setShow(true));
+    return () => document.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const openRepo = async () => {
+    try {
+      await openUrl(REPO_URL);
+    } catch {
+      try { window.open(REPO_URL, "_blank"); } catch { location.href = REPO_URL; }
+    }
+  };
+
+  const startClose = () => {
+    if (closing) return;
+    setClosing(true);
+    // wait for CSS transition to finish before invoking parent's onClose
+    setTimeout(() => onClose(), 220);
+  };
+
+  return (
+    <div className={`modal-backdrop ${show ? "show" : ""} ${closing ? "closing" : ""}`} onClick={startClose} data-tauri-drag-region="none">
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="about-title" onClick={(e) => e.stopPropagation()}>
+        <header id="about-title">About Bazzite Architect</header>
+        <div className="body">
+          <p>Bazzite Architect – Portable Dev Environments.</p>
+          <p>Version: 1.0.0</p>
+          <p>License & contributors are listed in the project repository.</p>
+        </div>
+        <div className="footer">
+          <button onClick={openRepo} data-tauri-drag-region="none">Open repository</button>
+          <button onClick={startClose} data-tauri-drag-region="none">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}

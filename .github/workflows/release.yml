@@ -1,0 +1,104 @@
+name: "Release & CI"
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'        # trigger on semantic version tags like v1.2.3
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:   # allow manual runs
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimal default permissions; release job elevates to write when needed
+permissions:
+  contents: read
+
+jobs:
+  ci-build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install system dependencies (ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Build (CI)
+        run: npm run build --if-present
+
+      - name: Verify Rust backend (cargo check)
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: ci-build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies (ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Build and release via Tauri Action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Bazzite Architect ${{ github.ref_name }}"
+          releaseBody: "Automated release from GitHub Actions."
+          releaseDraft: true
+          prerelease: false
