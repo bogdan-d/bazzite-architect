@@ -111,7 +111,9 @@ To eliminate boilerplate configuration, Bazzite Architect provides an automated 
 * Generates `.devcontainer/devcontainer.json` with a Fedora-based image and, where applicable, a `postCreateCommand` (e.g., `dnf install ...`) and recommended extensions.
 * Initializes the `.bazzite-architect.json` manifest (MVP tracks `system_packages`).
 
-Note: The orchestrator now guarantees minimal baseline toolchain/project files are created during scaffolding (for example: `requirements.txt` for Python, `package.json` for Node/React, `Cargo.toml` for Rust, `CMakeLists.txt` for C/C++, and `pom.xml` for Java). This prevents DevContainer `postCreateCommand` steps from failing on initial open due to missing files.
+Note: The orchestrator now guarantees minimal baseline toolchain/project files are created during scaffolding (for example: `requirements.txt` for Python, `package.json` for Node/React, `Cargo.toml` for Rust, `CMakeLists.txt` for C/C++, `pom.xml` for Java, and `*.csproj` for C#). This prevents DevContainer `postCreateCommand` steps from failing on initial open due to missing files.
+
+C# / .NET: The new C# template scaffolds a minimal Program.cs and a project file targeting .NET 8.0. The generated DevContainer and the Distrobox environment use the official .NET SDK image (`mcr.microsoft.com/dotnet/sdk:8.0`) and recommend the VS Code extensions `ms-dotnettools.csharp` and `ms-dotnettools.csdevkit`. The DevContainer is configured to run a lightweight `dotnet restore || true` in its start hook to fetch NuGet packages without blocking the editor attach sequence.
 
 From there, opening VS Code is a separate action invoked from the app. The result is a ready-to-use, containerized IDE setup with zero manual JSON editing required.
 
@@ -215,7 +217,7 @@ The following top-down flowchart shows the orchestration when the user selects a
 flowchart TD
   A["UI: Install package 'pkg'"] --> B[Validate request]
   B --> C[Write manifest: add pkg to system_packages]
-  C --> D["distrobox enter <env> -- sudo dnf install -y pkg"]
+  C --> D["distrobox enter <env> -- sudo <pm> install -y pkg (pm detected dynamically)"]
   D --> E["Update .devcontainer/devcontainer.json: append 'sudo dnf install -y pkg' to postCreateCommand"]
   E --> F[Install will apply on next DevContainer rebuild]
   F --> G[Return success or detailed error to UI]
@@ -456,8 +458,8 @@ This chapter outlines how failures are detected and surfaced, and how the backen
   - Write failures: install_system_package aborts with a clear error if it cannot serialize or write the updated manifest.
 - DevContainer configuration errors:
   - Reading/parsing/writing .devcontainer/devcontainer.json is validated in install_system_package. Any failure aborts before the live install step and returns the error as-is.
-- Live package install failures (dnf):
-  - After updating manifest and devcontainer.json, the backend runs sudo dnf install -y <pkg> inside the Distrobox. If that step fails, an error is returned: "Installation in the container failed: …". There is no rollback of the already-written manifest/devcontainer changes (as documented in Chapter 5).
+- Live package install failures (package manager):
+  - After updating manifest and devcontainer.json, the backend probes the container to detect the available package manager (for example: apt, dnf, apk, pacman) and runs the appropriate install command (e.g. `sudo apt-get install -y`, `sudo dnf install -y`). If that step fails, an error is returned: "Installation in the container failed: …". There is no rollback of the already-written manifest/devcontainer changes (as documented in Chapter 5).
 - Podman/Distrobox unavailable or failing:
   - Most operations map OS/CLI failures to human-readable strings, e.g., "Failed to execute 'distrobox …'". Examples: list_environments, start_environment, stop_environment, delete_environment.
   - system_check returns podman_ok/distrobox_ok booleans (plus versions if available) so the UI can short-circuit flows when the system is not ready.
@@ -654,6 +656,6 @@ While not strictly part of the core application binary, the continuous integrati
 
 - Continuous Integration (CI): All Pull Requests targeting the main branch are gated by a mandatory ci-build job. This job provisions an Ubuntu runner with the required GTK/WebKit dependencies and executes both frontend builds (npm run build) and backend validation (cargo check). Code cannot be merged unless this pipeline passes, ensuring the main branch remains permanently stable.
 
-- Continuous Deployment (CD): The project utilizes a tag-driven release architecture. Pushing a semantic version tag (e.g., v1.0.0) triggers a dedicated release job. Using tauri-action, the pipeline automatically compiles the native Linux binaries and bundles them into distributable packages (.deb and .rpm), publishing them directly as a GitHub Release draft.
+- Continuous Deployment (CD): The project utilizes a tag-driven release architecture. Pushing a semantic version tag (e.g., v1.1.0) triggers a dedicated release job. Using tauri-action, the pipeline automatically compiles the native Linux binaries and bundles them into distributable packages (.deb and .rpm), publishing them directly as a GitHub Release draft.
 
 - Infrastructure as Code: The pipeline logic is declared in .github/workflows/release.yml, maintaining our philosophy that all system behavior should be codified and reproducible.
