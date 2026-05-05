@@ -155,6 +155,8 @@ sudo dnf install ./Bazzite-Architect-1.1.0.x86_64.rpm
 
 *Note: Make sure Podman and Distrobox are available on your system (standard on Bazzite).*
 
+- AppImage option: You can also choose the AppImage distribution from the Releases page — this is a portable Linux bundle that works across many distributions (Ubuntu, Debian, Arch, SteamOS, etc.) without installation. AppImages are convenient but typically larger than native packages because they bundle runtime dependencies; if download size or disk usage matters, prefer the native .deb or .rpm for your distribution.
+
 ---
 
 
@@ -177,7 +179,7 @@ npm install
 
 # On Fedora/Bazzite/Kinoite (and other dnf-based immutable spins) install additional native deps needed
 # for WebKit/Gtk bindings and build tools before running the Tauri build:
-sudo dnf install -y webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel gtk3-devel gcc gcc-c++ make
+sudo dnf install -y webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel gtk3-devel gcc gcc-c++ make xdg-utils fuse
 ```
 
 2. Start the unified development workflow
