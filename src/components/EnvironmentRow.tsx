@@ -208,13 +208,15 @@ function EnvironmentRowImpl({ env, base, onOpenVSCode, onDelete }: Props) {
     <div ref={containerRef} style={{
       position: "relative",
       padding: 12,
-      background: "#222",
+      margin: "16px 0",
+      background: "#0f1724",
       borderRadius: 8,
-      border: "1px solid #444",
+      border: "1px solid rgba(255,255,255,0.04)",
+      boxShadow: "0 6px 18px rgba(2,6,23,0.6)",
       textAlign: "left",
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <strong>🧪 {env.name}</strong>
+        <strong style={{ color: "#ffffff", fontWeight: 600 }}>🧪 {env.name}</strong>
         <button
           onClick={() => setMenuOpen((v) => !v)}
           title="Menu"
@@ -321,7 +323,7 @@ function EnvironmentRowImpl({ env, base, onOpenVSCode, onDelete }: Props) {
         </div>
       )}
 
-      <div style={{ fontSize: 12, color: "#aaa", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+      <div style={{ fontSize: 12, color: "#e5e7eb", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
         <span>Status: {env.status} · Image: {env.image}</span>
         <span>
           · Space: {cached != null ? fmtSize(cached) : (pending ? <span className="spinner" /> : "?")} (project)
@@ -331,11 +333,11 @@ function EnvironmentRowImpl({ env, base, onOpenVSCode, onDelete }: Props) {
           {pending || resolving ? "Calculating…" : (cached != null ? "Refresh" : "Calculate")}
         </button>
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <button onClick={() => onOpenVSCode(env.name)} style={{ flex: 1 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+        <button onClick={() => onOpenVSCode(env.name)} style={{ flex: 1, background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 8, padding: '8px 10px', fontWeight: 600, cursor: 'pointer' }}>
           💻 Open in VS Code (remote)
         </button>
-        <button onClick={handleOpenTerminal} style={{ flex: 1, background: '#444', color: '#e5e7eb', border: 'none', borderRadius: 6, padding: '8px 10px' }}>
+        <button onClick={handleOpenTerminal} style={{ flex: 1, background: 'transparent', color: '#e5e7eb', border: '1px solid #374151', borderRadius: 8, padding: '8px 10px', cursor: 'pointer' }}>
           🖥️ Open in Terminal
         </button>
       </div>
