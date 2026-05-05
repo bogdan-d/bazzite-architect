@@ -117,7 +117,33 @@ C# / .NET: The new C# template scaffolds a minimal Program.cs and a project file
 
 From there, opening VS Code is a separate action invoked from the app. The result is a ready-to-use, containerized IDE setup with zero manual JSON editing required.
 
-### 4.3 DevContainer Lifecycle Hooks (Podman & Toolbox Integration)
+### 4.3 Open Mode: Terminal vs. VS Code (UI Button)
+
+A new explicit "Open" control offers users two distinct runtime entry points for an Environment: "Open in Terminal" (Distrobox host terminal) and "Open in VS Code" (DevContainer/IDE attach). This toggle simplifies the mental model and makes lifecycle and provisioning semantics explicit.
+
+- UX semantics
+  - Open in Terminal: performs a non-blocking entry into the Distrobox environment (e.g., `distrobox enter <env>`). This path is intended for immediate CLI work and live package installs; changes applied here reflect the host/Distrobox universe immediately.
+  - Open in VS Code: launches VS Code attached to the generated DevContainer (`devcontainer` flow). The DevContainer lifecycle is preserved (build/rebuild, postCreate/postStart hooks apply). Long-running system package installs should be deferred to postStart so they do not block agent attach.
+
+- Architectural implications
+  - Single Source of Truth: both entry paths read/write the same manifest (.bazzite-architect.json). The manifest controls desired system packages; a change in the Terminal path triggers a live Distrobox install and appends the required steps to the DevContainer hooks so parity is achieved on the next container rebuild.
+  - Provisioning guarantees: "Open in Terminal" is suitable when a developer needs immediate CLI access (fast feedback). "Open in VS Code" is the canonical path for IDE-attached workflows; it must preserve the agent startup semantics described in Section 4.x (move heavy installs to postStart).
+  - Sync visibility: when a live package install is performed via the Terminal path, the UI shows a structured progress/log stream and marks the manifest/devcontainer.json as modified so the user understands the eventual DevContainer rebuild requirement.
+
+- Security & UX guidance
+  - Default suggestion: surface a short explainer tooltip/warning when the user chooses "Open in Terminal" if the environment mount includes a host $HOME (risk of secret exposure).
+  - Recommended default button: default to "Open in VS Code" for new environments to encourage the zero-config IDE flow; expose "Open in Terminal" as the explicit alternative for advanced users.
+
+- Implementation notes
+  - Command routing: implement a single handler that accepts a launch-mode enum { Terminal, VSCode } and orchestrates:
+    1. Ensure manifest and .devcontainer are up-to-date.
+    2. For Terminal: invoke the host executor (build_host_command_async) -> `distrobox enter <env>` (non-blocking); stream process logs.
+    3. For VSCode: call open_in_vscode / devcontainer flow used today.
+  - Telemetry and logging: emit an app-notification/log event for the chosen mode to aid diagnostics and to audit whether users typically prefer one path.
+  - Tests: add integration tests to assert that manifest edits performed via Terminal are persisted and that DevContainer hooks reflect those edits after the next rebuild.
+
+
+### 4.4 DevContainer Lifecycle Hooks (Podman & Toolbox Integration)
 
 On immutable host systems (for example: Bazzite/Kinoite) and when leveraging rootless Podman via toolbox/distrobox, we discovered a critical lifecycle interaction between DevContainer hooks and the VS Code agent attach sequence.
 
@@ -130,22 +156,6 @@ On immutable host systems (for example: Bazzite/Kinoite) and when leveraging roo
   * If a task must run only once, use a small marker file (e.g., `.bazzite/first_run_done`) and have `postStartCommand` check that marker before running the heavy steps. Alternatively, keep an extremely lightweight `postCreateCommand` that writes the marker and performs no blocking installs.
   * Avoid backgrounding hacks that detach the install process; instead use the lifecycle hook semantics to guarantee correct sequencing.
   * This is a platform-specific hedge against the idiosyncrasies of rootless Podman and toolbox, and is documented here to prevent future regressions.
-
-### 5.3.3 DevContainer orphan cleanup on environment delete
-
-A practical lifecycle problem we encountered in the field is "zombie" DevContainers that outlive their companion Distrobox environment. If a DevContainer remains running after a Distrobox environment is removed, and the user later recreates an environment that reuses the same host path, VS Code may reattach to the orphaned container. Because the orphaned container's mounts and inodes can be stale, this commonly manifests as an empty File Explorer and broken mounts.
-
-Mitigation implemented in the MVP:
-
-- Best-effort host cleanup: When the user deletes an environment and the backend determines a host project path, the commands layer performs a best-effort host-side Podman cleanup to remove any containers labeled by VS Code as belonging to that workspace (`devcontainer.local_folder=<PROJECT_PATH>`).
-- Host delegation: Because the backend may run inside a Distrobox during development, all host-level Podman calls are delegated through the host executor (via `build_host_command_async`) so the cleanup runs on the host and can see host containers.
-- Path normalization & matching robustness:
-  - Trailing slashes are trimmed before matching (e.g., `/home/foo/` → `/home/foo`).
-  - Both `/home/...` and `/var/home/...` variants are queried to accommodate Silverblue/Bazzite symlink layouts.
-  - Each variant is checked independently and any matching container IDs are removed with `podman rm -f`.
-- Non-fatal: The cleanup is strictly best-effort. Podman failures, missing binaries, or empty matches are logged but do not cause the overall delete operation to fail. This guarantees users are not blocked by peripheral cleanup issues.
-
-Rationale: this targeted cleanup closes a practical UX loop—preventing VS Code from reattaching to stale containers—while preserving a fail-safe deletion flow and maintaining the immutable-host principles described above.
 
 This principle is a deliberate trade-off: we accept that dev-time provisioning may occur after the IDE is attached (and visible) in order to guarantee the UI and agent lifecycle remain healthy. The manifest & sync engine remain the single source of truth for required system packages; the orchestration simply schedules their application at a safer lifecycle point.
 
@@ -235,6 +245,22 @@ flowchart TD
 - Retry/backoff policies for transient repo/network errors.
 - Drift detection and adopt/remove flows for manual in-container changes.
 - Optional “Rebuild now” action to apply DevContainer changes immediately.
+
+### 5.3.3 DevContainer orphan cleanup on environment delete
+
+A practical lifecycle problem we encountered in the field is "zombie" DevContainers that outlive their companion Distrobox environment. If a DevContainer remains running after a Distrobox environment is removed, and the user later recreates an environment that reuses the same host path, VS Code may reattach to the orphaned container. Because the orphaned container's mounts and inodes can be stale, this commonly manifests as an empty File Explorer and broken mounts.
+
+Mitigation implemented in the MVP:
+
+- Best-effort host cleanup: When the user deletes an environment and the backend determines a host project path, the commands layer performs a best-effort host-side Podman cleanup to remove any containers labeled by VS Code as belonging to that workspace (`devcontainer.local_folder=<PROJECT_PATH>`).
+- Host delegation: Because the backend may run inside a Distrobox during development, all host-level Podman calls are delegated through the host executor (via `build_host_command_async`) so the cleanup runs on the host and can see host containers.
+- Path normalization & matching robustness:
+  - Trailing slashes are trimmed before matching (e.g., `/home/foo/` → `/home/foo`).
+  - Both `/home/...` and `/var/home/...` variants are queried to accommodate Silverblue/Bazzite symlink layouts.
+  - Each variant is checked independently and any matching container IDs are removed with `podman rm -f`.
+- Non-fatal: The cleanup is strictly best-effort. Podman failures, missing binaries, or empty matches are logged but do not cause the overall delete operation to fail. This guarantees users are not blocked by peripheral cleanup issues.
+
+Rationale: this targeted cleanup closes a practical UX loop—preventing VS Code from reattaching to stale containers—while preserving a fail-safe deletion flow and maintaining the immutable-host principles described above.
 
 Outcome: With a declarative manifest and immediate application in Distrobox, environments remain consistent enough for day-to-day work. DevContainer parity is ensured on the next rebuild via postCreateCommand.
 
@@ -656,6 +682,15 @@ While not strictly part of the core application binary, the continuous integrati
 
 - Continuous Integration (CI): All Pull Requests targeting the main branch are gated by a mandatory ci-build job. This job provisions an Ubuntu runner with the required GTK/WebKit dependencies and executes both frontend builds (npm run build) and backend validation (cargo check). Code cannot be merged unless this pipeline passes, ensuring the main branch remains permanently stable.
 
-- Continuous Deployment (CD): The project utilizes a tag-driven release architecture. Pushing a semantic version tag (e.g., v1.2.0) triggers a dedicated release job. Using tauri-action, the pipeline automatically compiles the native Linux binaries and bundles them into distributable packages (.deb and .rpm), publishing them directly as a GitHub Release draft.
+- Continuous Deployment (CD): The project utilizes a tag-driven release architecture. Pushing a semantic version tag (e.g., v1.2.0) triggers a dedicated release job. Using tauri-action, the pipeline automatically compiles the native Linux binaries and bundles them into distributable packages (.deb, .rpm, and AppImage), publishing them directly as a GitHub Release draft.
+
+  AppImage specifics:
+  - AppImage target: The CI builds an AppImage artifact alongside native packages so users can run a portable single-file bundle on many Linux distributions without installation.
+  - BuildRunner: the AppImage is built on a Linux runner (Ubuntu) using the same tauri-action bundle step (target: appimage) or the AppImage toolchain as required by the packaging step.
+  - Artifact naming and metadata: artifacts follow the pattern Bazzite-Architect-<version>-<arch>.<ext> (for example: Bazzite-Architect-1.2.0-x86_64.AppImage). The pipeline generates checksums (SHA256) and signs artifacts (GPG) when signing keys are available in the secrets store.
+  - Release behavior: the workflow attaches the AppImage to the GitHub Release draft in addition to .deb and .rpm. Optionally, the pipeline can create a signed, versioned download URL and publish release notes with the checksum table.
+  - Reproducibility & runners: AppImage builds are best executed on a clean Linux runner; if deterministic builds are a priority, consider using an isolated builder (e.g., a reproducible CI image) and pinning the toolchain versions.
+
+  Note: AppImage generation is opt-in configurable in the workflow so downstream maintainers can disable it if they prefer distribution-specific packages only.
 
 - Infrastructure as Code: The pipeline logic is declared in .github/workflows/release.yml, maintaining our philosophy that all system behavior should be codified and reproducible.
