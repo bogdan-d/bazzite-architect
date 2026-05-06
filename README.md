@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="git_src/assets/EnvStation_Banner.png" alt="EnvStation" width="600" />
+  <img src="git_src/assets/EnvStation_Banner.png" alt="EnvStation" width="500" />
   <br/>
   <br/>
   <img src="https://img.shields.io/badge/backend-Rust_1.80+-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" />
@@ -39,9 +39,12 @@ On immutable systems, your host is read-only. Usually, your dependencies are tra
 * **The Result:** Run `gcc`, `python`, or `git` anywhere—inside or outside of VS Code—without configuring it twice.
 
 ### 2. Intelligent Drift Detection
-Manual changes are inevitable, but they usually break container portability. EnvStation is the only tool that keeps track of your environment's "source of truth."
-* **Baseline Diffing:** Our smart engine snapshots your initial container state to distinguish between pre-installed system bloat and your actual project dependencies.
-* **State Reconciliation:** If your Distrobox, DevContainer, or Manifest fall out of sync, EnvStation has an option to scan your environments and offering a **one-click sync** to restore order.
+Manual changes in the terminal are inevitable—but they often lead to "snowflake" environments that are impossible to reproduce. EnvStation keeps you in control:
+* **Smart Baseline:** Instead of cluttering your view with hundreds of pre-installed system packages, EnvStation snapshots the environment the moment it's created. This ensures you only see the packages *you* actually added.
+* **No More Guesswork:** The app detects when your container, your VS Code setup, and your configuration file fall out of sync.
+* **One-Click Sync:** If things "drift" apart, EnvStation offers a simple fix: a single click to bring all layers back into perfect alignment.
+
+**The Result:** Your environments stay clean, slim, and—most importantly—reproducible, no matter how much you experiment in the terminal.
 
 ### 3. Abstracting the Complexity
 You shouldn't need a PhD in Container-Orchestration just to write "Hello World."
@@ -138,7 +141,23 @@ systemctl --user enable --now podman.socket
 
 ### Installation (End-User)
 
-EnvStation is distributed as native packages (.deb and .rpm) and as an AppImage. Choose the option that best fits your distribution.
+Recommended (No‑Reboot) Way — AppImage
+--------------------------------------
+For immutable hosts (Bazzite, Fedora Silverblue, Kinoite, SteamOS), the AppImage is the recommended distribution because it requires no system changes or reboot. It provides the smoothest experience for users who cannot or prefer not to modify the OSTree system image.
+
+#### AppImage (Recommended)
+AppImage runs on most distributions without installation:
+```bash
+chmod +x EnvStation-1.0.0.AppImage
+./EnvStation-1.0.0.AppImage
+```
+AppImages are portable and convenient but usually larger (they bundle runtimes). Use this if you want to avoid modifying the immutable host or rebooting.
+
+---
+
+Other install options
+---------------------
+EnvStation is also distributed as native packages (.deb and .rpm). Choose the option that fits your distro and policy.
 
 #### Debian / Ubuntu (.deb)
 ```bash
@@ -151,13 +170,22 @@ sudo dpkg -i EnvStation_1.0.0_amd64.deb
 sudo apt-get install -f
 ```
 
-#### Fedora / RHEL (.rpm)
+#### Fedora / RHEL Immutable Hosts (Silverblue / Bazzite / Kinoite)
+On OSTree-based immutable systems you cannot use `sudo dnf` to install host packages. Use rpm-ostree and reboot to apply the deployment:
 ```bash
-# On Fedora and other dnf-based systems:
-sudo dnf install ./EnvStation-1.0.0.x86_64.rpm
+# Install to the immutable OSTree deployment (example):
+sudo rpm-ostree install ./EnvStation-1.0.0.x86_64.rpm
+# A system reboot is required to apply the new deployment
+sudo systemctl reboot
+```
+Notes:
+- rpm-ostree performs an atomic OSTree deployment. The package is staged and becomes active after reboot.
+- If you prefer not to reboot or modify the host image, use the AppImage instead.
 
-# Alternatively (lower-level tool):
-sudo rpm -Uvh EnvStation-1.0.0.x86_64.rpm
+#### Fedora / RHEL (traditional, mutable systems)
+If you are on a mutable Fedora/RHEL workstation (not OSTree-based), you can install with dnf:
+```bash
+sudo dnf install ./EnvStation-1.0.0.x86_64.rpm
 ```
 
 #### Arch Linux (pkg.tar.zst or AUR)
@@ -171,16 +199,9 @@ paru -S envstation   # or yay -S envstation
 ```
 If no Arch package is available, prefer the AppImage or build from source.
 
-#### AppImage (portable)
-AppImage runs on most distributions without installation:
-```bash
-chmod +x EnvStation-1.0.0.AppImage
-./EnvStation-1.0.0.AppImage
-```
-AppImages are portable and convenient but usually larger (they bundle runtimes). If disk usage matters, prefer a native package.
-
 #### Notes:
 - Make sure Podman and Distrobox are installed and working before running EnvStation. EnvStation expects rootless Podman for normal operation.
+- On OSTree-based systems (Silverblue / Bazzite / Kinoite) prefer the AppImage or use rpm-ostree and reboot to install host packages.
 - For RHEL / CentOS you may prefer to use EPEL or the distro's packaging tools to get Podman and its dependencies.
 
 ---
