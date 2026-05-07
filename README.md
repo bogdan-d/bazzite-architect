@@ -283,13 +283,6 @@ Notes:
 - If you run into missing headers or pkg-config errors, double-check the dev packages above for your distro and install pkg-config if required.
 
 ---
-
-## Developer Hub
-
-See ARCHITECTURE.md for design details and the sync logic. If you plan to contribute or review the system, start there.
-
----
-
 ## Contributing
 
 We welcome contributions that respect the project's architecture and testing boundaries. Please consult ARCHITECTURE.md before making large structural changes; follow the Core → Commands → View separation and prefer small, reviewable PRs.
